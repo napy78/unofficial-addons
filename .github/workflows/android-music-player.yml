@@ -3,6 +3,8 @@ on:
   push:
     paths: ['android-music-player/**', '.github/workflows/android-music-player.yml']
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,3 +23,13 @@ jobs:
         with:
           name: NapyPlayer-apk
           path: android-music-player/app/build/outputs/apk/release/*.apk
+      - name: Pubblica Release con l'APK
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/release/*.apk NapyPlayer.apk
+          gh release create "napyplayer-build-${{ github.run_number }}" NapyPlayer.apk \
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease \
+            --title "Napy Player - build ${{ github.run_number }}" \
+            --notes "APK installabile (firmato con chiave di debug). Commit ${{ github.sha }}"
