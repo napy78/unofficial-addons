@@ -18,6 +18,7 @@ import com.napy.musicplayer.data.Scanner
 import com.napy.musicplayer.data.Track
 import com.napy.musicplayer.playback.PlaybackService
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -27,6 +28,7 @@ data class PlayerUi(
     val playing: Boolean = false,
     val mediaId: String = "",
     val uri: String = "",
+    val path: String = "",
     val title: String = "",
     val artist: String = "",
     val album: String = "",
@@ -36,6 +38,14 @@ data class PlayerUi(
     val shuffle: Boolean = false,
     val repeat: Int = Player.REPEAT_MODE_OFF
 )
+
+sealed interface TreeNode { val key: String; val depth: Int }
+data class FolderNode(val folder: Folder, override val depth: Int, val open: Boolean) : TreeNode {
+    override val key get() = "f" + folder.path
+}
+data class TrackNode(val track: Track, override val depth: Int) : TreeNode {
+    override val key get() = "t" + track.id
+}
 
 data class ScanUi(val running: Boolean = false, val message: String = "")
 
@@ -47,14 +57,46 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var controller: MediaController? = null
 
     // ---------- libreria ----------
-    private val _stack = MutableStateFlow(listOf(""))
-    val stack = _stack.asStateFlow()
-    val current = _stack.map { it.last() }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
-    val folders = current.flatMapLatest { dao.folders(it) }
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList<Folder>())
-    val folderTracks = current.flatMapLatest { dao.tracksIn(it) }
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList<Track>())
+    /** Cartelle aperte nell'albero. */
+    val expanded = MutableStateFlow<Set<String>>(emptySet())
+    private val expandedTracks = expanded.flatMapLatest { dao.tracksInFolders(it.toList()) }
+
+    /** Albero appiattito (solo righe visibili), pronto per una LazyColumn. */
+    val tree: StateFlow<List<TreeNode>> =
+        combine(dao.allFolders(), expanded, expandedTracks) { f, e, t -> buildTree(f, e, t) }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val trackCount = dao.trackCount().stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    /** Emesso quando parte una riproduzione: la UI passa al player a tutto schermo. */
+    val openPlayer = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    private fun buildTree(folders: List<Folder>, open: Set<String>, tracks: List<Track>): List<TreeNode> {
+        val kids = folders.groupBy { it.parent }.mapValues { (_, v) -> v.sortedBy { it.name.lowercase() } }
+        val byFolder = tracks.groupBy { it.folder }
+        // salta i livelli "di passaggio" (es. /storage/emulated/0) con una sola sottocartella e nessun brano
+        var root = ""
+        while (true) {
+            val k = kids[root] ?: break
+            if (k.size == 1 && k[0].ownCount == 0) root = k[0].path else break
+        }
+        val out = ArrayList<TreeNode>()
+        fun walk(parent: String, depth: Int) {
+            for (f in kids[parent].orEmpty()) {
+                val isOpen = f.path in open
+                out += FolderNode(f, depth, isOpen)
+                if (isOpen) {
+                    walk(f.path, depth + 1)
+                    for (t in byFolder[f.path].orEmpty()) out += TrackNode(t, depth + 1)
+                }
+            }
+        }
+        walk(root, 0)
+        return out
+    }
+
+    fun toggleFolder(path: String) { expanded.update { if (path in it) it - path else it + path } }
+    fun collapseAll() { expanded.value = emptySet() }
 
     val query = MutableStateFlow("")
     val searchResults = query.debounce(150).flatMapLatest { dao.search(it.trim()) }
@@ -68,7 +110,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val ui = _ui.asStateFlow()
 
     init {
-        viewModelScope.launch { resetRoot() }
         connectPlayer()
         viewModelScope.launch {
             while (true) {
@@ -79,23 +120,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Scende finche' c'e' una sola sottocartella e nessun brano: salta /storage/emulated/0. */
-    private suspend fun resetRoot() {
-        var p = ""
-        while (true) {
-            val kids = dao.foldersOnce(p)
-            if (kids.size == 1 && dao.countIn(p) == 0) p = kids[0].path else break
-        }
-        _stack.value = listOf(p)
-    }
-
-    fun openFolder(path: String) { _stack.update { it + path } }
-    fun goUp(): Boolean {
-        if (_stack.value.size <= 1) return false
-        _stack.update { it.dropLast(1) }
-        return true
-    }
-
     fun rescan() {
         if (_scan.value.running) return
         viewModelScope.launch {
@@ -103,7 +127,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val r = runCatching { scanner.scan { n -> _scan.value = ScanUi(true, "$n brani letti") } }
             r.onSuccess {
                 _scan.value = ScanUi(false, "+${it.added}  -${it.removed}  (${it.total} totali)")
-                if (_stack.value.size <= 1) resetRoot()
             }.onFailure { _scan.value = ScanUi(false, "Errore: ${it.message}") }
         }
     }
@@ -132,6 +155,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             playing = c.isPlaying,
             mediaId = item?.mediaId ?: "",
             uri = item?.localConfiguration?.uri?.toString() ?: "",
+            path = md?.extras?.getString("path") ?: "",
             title = md?.title?.toString() ?: "",
             artist = md?.artist?.toString() ?: "",
             album = md?.albumTitle?.toString() ?: "",
@@ -154,6 +178,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .setArtworkUri(android.net.Uri.parse("content://media/external/audio/albumart/$albumId"))
                 .setExtras(Bundle().apply {
                     putString("fmt", fileName.substringAfterLast('.', "").uppercase())
+                    putString("path", path)
                 })
                 .build()
         ).build()
@@ -165,6 +190,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         c.setMediaItems(tracks.map { it.toItem() }, if (shuffle) (tracks.indices).random() else index, 0L)
         c.prepare()
         c.play()
+        openPlayer.tryEmit(Unit)
+    }
+
+    /** Tocco su un brano nell'albero: la coda e' l'elenco dei brani di quella cartella. */
+    fun playFromTree(t: Track) {
+        val siblings = tree.value.filterIsInstance<TrackNode>().map { it.track }.filter { it.folder == t.folder }
+        play(siblings, siblings.indexOfFirst { it.id == t.id }.coerceAtLeast(0))
     }
 
     fun playFolder(path: String, shuffle: Boolean) {

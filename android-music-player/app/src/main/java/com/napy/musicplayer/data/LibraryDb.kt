@@ -28,22 +28,23 @@ data class Folder(
     @PrimaryKey val path: String,
     val parent: String,
     val name: String,
-    val trackCount: Int                // brani totali (sottocartelle incluse)
+    val trackCount: Int,               // brani totali (sottocartelle incluse)
+    val ownCount: Int,                 // brani direttamente in questa cartella
+    // brano rappresentativo, usato per ricavare la locandina della cartella
+    val artUri: String,
+    val artPath: String,
+    val artArtist: String,
+    val artAlbum: String,
+    val artTitle: String
 )
 
 @Dao
 interface LibraryDao {
-    @Query("SELECT * FROM folders WHERE parent = :parent ORDER BY name COLLATE NOCASE")
-    fun folders(parent: String): Flow<List<Folder>>
+    @Query("SELECT * FROM folders ORDER BY path COLLATE NOCASE")
+    fun allFolders(): Flow<List<Folder>>
 
-    @Query("SELECT * FROM folders WHERE parent = :parent")
-    suspend fun foldersOnce(parent: String): List<Folder>
-
-    @Query("SELECT * FROM tracks WHERE folder = :folder ORDER BY fileName COLLATE NOCASE")
-    fun tracksIn(folder: String): Flow<List<Track>>
-
-    @Query("SELECT COUNT(*) FROM tracks WHERE folder = :folder")
-    suspend fun countIn(folder: String): Int
+    @Query("SELECT * FROM tracks WHERE folder IN (:folders) ORDER BY fileName COLLATE NOCASE")
+    fun tracksInFolders(folders: List<String>): Flow<List<Track>>
 
     @Query(
         "SELECT * FROM tracks WHERE folder = :folder OR substr(folder, 1, length(:folder) + 1) = :folder || '/' " +
@@ -67,14 +68,14 @@ interface LibraryDao {
     @Query("DELETE FROM tracks WHERE id IN (:ids)") suspend fun deleteTracks(ids: List<Long>)
     @Query("DELETE FROM folders") suspend fun clearFolders()
     @Insert suspend fun insertFolders(f: List<Folder>)
-    @Query("SELECT DISTINCT folder FROM tracks") suspend fun allTrackFolders(): List<String>
-    @Query("SELECT folder, COUNT(*) AS n FROM tracks GROUP BY folder") suspend fun folderCounts(): List<FolderCount>
+    @Query("SELECT folder, uri, path, artist, album, title FROM tracks ORDER BY fileName COLLATE NOCASE")
+    suspend fun repRows(): List<RepRow>
 }
 
 data class Stamp(val id: Long, val modified: Long)
-data class FolderCount(val folder: String, val n: Int)
+data class RepRow(val folder: String, val uri: String, val path: String, val artist: String, val album: String, val title: String)
 
-@Database(entities = [Track::class, Folder::class], version = 1, exportSchema = false)
+@Database(entities = [Track::class, Folder::class], version = 2, exportSchema = false)
 abstract class LibraryDb : RoomDatabase() {
     abstract fun dao(): LibraryDao
 
@@ -82,7 +83,7 @@ abstract class LibraryDb : RoomDatabase() {
         @Volatile private var inst: LibraryDb? = null
         fun get(ctx: Context): LibraryDb = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx.applicationContext, LibraryDb::class.java, "library.db")
-                .build().also { inst = it }
+                .fallbackToDestructiveMigration().build().also { inst = it }
         }
     }
 }

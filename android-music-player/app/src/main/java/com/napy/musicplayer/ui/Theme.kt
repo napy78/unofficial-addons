@@ -1,22 +1,23 @@
 package com.napy.musicplayer.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
-val Bg = Color(0xFF0B0B14)
-val Surface1 = Color(0xFF17172A)
-val Surface2 = Color(0xFF202039)
-val Violet = Color(0xFF7C4DFF)
-val Pink = Color(0xFFFF4081)
-val Cyan = Color(0xFF18FFFF)
-val TextDim = Color(0xFF9A9AB8)
+// Palette ad alto contrasto: sfondo quasi nero, card nettamente piu' chiare con bordo, testo bianco/lilla chiaro.
+val Bg = Color(0xFF05050B)
+val Surface1 = Color(0xFF1E1E38)
+val Surface2 = Color(0xFF2C2C52)
+val Border = Color(0xFF5A5A92)
+val Violet = Color(0xFF9A78FF)
+val Pink = Color(0xFFFF7AA8)
+val Cyan = Color(0xFF55EBFF)
+val TextDim = Color(0xFFD0D0EA)
 
-val AccentBrush = Brush.linearGradient(listOf(Violet, Pink))
-val BgBrush = Brush.verticalGradient(listOf(Color(0xFF241447), Bg, Color(0xFF07070D)))
+val AccentBrush = Brush.linearGradient(listOf(Color(0xFF6B3CF2), Color(0xFFE0307A)))
+val BgBrush = Brush.verticalGradient(listOf(Color(0xFF2A1758), Bg, Color(0xFF040408)))
 
 @Composable
 fun NapyTheme(content: @Composable () -> Unit) {

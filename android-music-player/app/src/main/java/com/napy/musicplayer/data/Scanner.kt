@@ -81,20 +81,32 @@ class Scanner(private val ctx: Context, private val db: LibraryDb) {
         ScanResult(added, gone.size, seen.size)
     }
 
-    /** Costruisce l'albero: ogni cartella con brani + tutti i suoi antenati, con conteggio ricorsivo. */
+    private class Acc { var n = 0; var own = 0; var rep: RepRow? = null }
+
+    /** Costruisce l'albero: ogni cartella con brani + tutti i suoi antenati, con conteggi e brano rappresentativo. */
     private suspend fun rebuildFolders() {
         val dao = db.dao()
-        val counts = HashMap<String, Int>()
-        for (fc in dao.folderCounts()) {
-            var p: String? = fc.folder
-            while (!p.isNullOrEmpty() && p != "/") {
-                counts[p] = (counts[p] ?: 0) + fc.n
+        val map = HashMap<String, Acc>()
+        for (r in dao.repRows()) {
+            var p = r.folder
+            var first = true
+            while (p.isNotEmpty() && p != "/") {
+                val a = map.getOrPut(p) { Acc() }
+                a.n++
+                if (first) a.own++
+                val cur = a.rep
+                if (cur == null || (cur.album.isBlank() && r.album.isNotBlank())) a.rep = r
+                first = false
                 p = p.substringBeforeLast('/', "")
             }
         }
-        val folders = counts.map { (path, n) ->
-            val parent = path.substringBeforeLast('/', "").let { if (it.isEmpty() || it == path) "" else it }
-            Folder(path, parent, path.substringAfterLast('/'), n)
+        val folders = map.map { (path, a) ->
+            val parent = path.substringBeforeLast('/', "")
+            val r = a.rep
+            Folder(
+                path, parent, path.substringAfterLast('/'), a.n, a.own,
+                r?.uri ?: "", r?.path ?: "", r?.artist ?: "", r?.album ?: "", r?.title ?: ""
+            )
         }
         db.withTransaction {
             dao.clearFolders()

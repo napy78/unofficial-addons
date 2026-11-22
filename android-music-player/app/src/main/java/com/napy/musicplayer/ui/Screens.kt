@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
+import com.napy.musicplayer.data.Folder
 import com.napy.musicplayer.data.Track
 
 fun fmt(ms: Long): String {
@@ -42,14 +43,24 @@ fun fmt(ms: Long): String {
 }
 
 // ------------------------------------------------------------------ copertina
+fun Track.art() = ArtKey(uri, path, artist, album, title)
+fun Folder.art() = ArtKey(artUri, artPath, artArtist, artAlbum, artTitle)
+fun PlayerUi.art() = ArtKey(uri, path, artist, album, title)
+
 @Composable
-fun Cover(uri: String, size: androidx.compose.ui.unit.Dp, radius: androidx.compose.ui.unit.Dp = 12.dp, modifier: Modifier = Modifier) {
+fun Cover(
+    key: ArtKey?, size: androidx.compose.ui.unit.Dp, radius: androidx.compose.ui.unit.Dp = 12.dp,
+    modifier: Modifier = Modifier, placeholder: ImageVector = Icons.Rounded.MusicNote
+) {
     Box(
-        modifier.size(size).clip(RoundedCornerShape(radius)).background(Brush.linearGradient(listOf(Surface2, Surface1))),
+        modifier.size(size).clip(RoundedCornerShape(radius)).background(Brush.linearGradient(listOf(Surface2, Surface1)))
+            .border(1.dp, Border, RoundedCornerShape(radius)),
         contentAlignment = Alignment.Center
     ) {
-        Icon(Icons.Rounded.MusicNote, null, tint = TextDim, modifier = Modifier.size(size * 0.5f))
-        if (uri.isNotEmpty()) AsyncImage(ArtKey(uri), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        Icon(placeholder, null, tint = TextDim, modifier = Modifier.size(size * 0.5f))
+        if (key != null && key.uri.isNotEmpty()) {
+            AsyncImage(key, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        }
     }
 }
 
@@ -71,10 +82,8 @@ fun AppScreen(vm: MainViewModel, granted: Boolean, askPermission: () -> Unit) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     var showPlayer by remember { mutableStateOf(false) }
     var tab by remember { mutableIntStateOf(0) }
-    val stack by vm.stack.collectAsStateWithLifecycle()
-
+    LaunchedEffect(Unit) { vm.openPlayer.collect { showPlayer = true } }
     BackHandler(showPlayer) { showPlayer = false }
-    BackHandler(!showPlayer && tab == 0 && stack.size > 1) { vm.goUp() }
 
     Box(Modifier.fillMaxSize().background(BgBrush)) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -84,7 +93,7 @@ fun AppScreen(vm: MainViewModel, granted: Boolean, askPermission: () -> Unit) {
             } else {
                 TabBar(tab) { tab = it }
                 Box(Modifier.weight(1f)) {
-                    if (tab == 0) FolderBrowser(vm, ui) else AllTracks(vm, ui)
+                    if (tab == 0) TreeBrowser(vm, ui) else AllTracks(vm, ui)
                 }
             }
             if (ui.hasMedia) MiniPlayer(vm, ui) { showPlayer = true }
@@ -138,7 +147,7 @@ fun TabBar(selected: Int, onSelect: (Int) -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clip(RoundedCornerShape(24.dp)).background(Surface1).padding(4.dp)
     ) {
-        listOf("Cartelle" to Icons.Rounded.Folder, "Tutti i brani" to Icons.Rounded.QueueMusic).forEachIndexed { i, (label, icon) ->
+        listOf("Cartelle" to Icons.Rounded.AccountTree, "Cerca" to Icons.Rounded.Search).forEachIndexed { i, (label, icon) ->
             val on = i == selected
             Row(
                 Modifier.weight(1f).clip(RoundedCornerShape(20.dp))
@@ -154,59 +163,96 @@ fun TabBar(selected: Int, onSelect: (Int) -> Unit) {
     }
 }
 
-// ------------------------------------------------------------------ cartelle
-@Composable
-fun FolderBrowser(vm: MainViewModel, ui: PlayerUi) {
-    val folders by vm.folders.collectAsStateWithLifecycle()
-    val tracks by vm.folderTracks.collectAsStateWithLifecycle()
-    val current by vm.current.collectAsStateWithLifecycle()
-    val stack by vm.stack.collectAsStateWithLifecycle()
+// ------------------------------------------------------------------ albero cartelle
+private val INDENT = 22.dp
 
+@Composable
+fun TreeBrowser(vm: MainViewModel, ui: PlayerUi) {
+    val rows by vm.tree.collectAsStateWithLifecycle()
+    val open by vm.expanded.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxSize()) {
-        if (stack.size > 1) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { vm.goUp() }) { Icon(Icons.Rounded.ArrowBack, "Su", tint = Color.White) }
-                Text(current.substringAfterLast('/'), fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Tocca una cartella per aprirla", color = TextDim, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            if (open.isNotEmpty()) {
+                Text(
+                    "Comprimi tutto", color = Cyan, fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                    modifier = Modifier.clip(CircleShape).clickable { vm.collapseAll() }.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
             }
         }
-        if (folders.isNotEmpty() || tracks.isNotEmpty()) {
-            Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                PillButton("Riproduci tutto", Icons.Rounded.PlayArrow, Modifier.weight(1f)) { vm.playFolder(current, false) }
-                PillButton("Casuale", Icons.Rounded.Shuffle, Modifier.weight(1f)) { vm.playFolder(current, true) }
+        if (rows.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Nessun brano trovato.\nPremi il pulsante di aggiornamento in alto.", color = TextDim, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
-            items(folders, key = { "f" + it.path }) { f ->
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(16.dp)).background(Surface1)
-                        .clickable { vm.openFolder(f.path) }.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(AccentBrush), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Folder, null, tint = Color.White)
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(f.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${f.trackCount} brani", color = TextDim, fontSize = 12.sp)
-                    }
-                    Icon(Icons.Rounded.ChevronRight, null, tint = TextDim)
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
+            items(rows, key = { it.key }) { node ->
+                when (node) {
+                    is FolderNode -> FolderRow(node, onToggle = { vm.toggleFolder(node.folder.path) }, onPlay = { vm.playFolder(node.folder.path, false) })
+                    is TrackNode -> TreeTrackRow(node, ui) { vm.playFromTree(node.track) }
                 }
             }
-            items(tracks, key = { "t" + it.id }) { t ->
-                TrackRow(t, ui) { vm.play(tracks, tracks.indexOf(t)) }
+        }
+    }
+}
+
+/** Disegna le linee verticali guida dell'albero, una per ogni livello di profondita'. */
+private fun Modifier.treeGuides(depth: Int) = drawBehind {
+    val step = INDENT.toPx()
+    for (d in 0 until depth) {
+        val x = step * d + step / 2
+        drawLine(Border, androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Offset(x, size.height), 2.dp.toPx())
+    }
+}
+
+@Composable
+fun FolderRow(n: FolderNode, onToggle: () -> Unit, onPlay: () -> Unit) {
+    val rot by animateFloatAsState(if (n.open) 90f else 0f, label = "chev")
+    val shape = RoundedCornerShape(16.dp)
+    Row(Modifier.fillMaxWidth().treeGuides(n.depth).padding(start = INDENT * n.depth, top = 3.dp, bottom = 3.dp)) {
+        Row(
+            Modifier.weight(1f).clip(shape).background(if (n.open) Surface2 else Surface1)
+                .border(1.dp, if (n.open) Cyan else Border, shape)
+                .clickable(onClick = onToggle).padding(start = 6.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Rounded.ChevronRight, if (n.open) "Chiudi" else "Apri", tint = Color.White, modifier = Modifier.size(30.dp).rotate(rot))
+            Cover(n.folder.art(), 54.dp, 12.dp, placeholder = Icons.Rounded.Folder)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(n.folder.name, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("${n.folder.trackCount} brani", color = TextDim, fontSize = 13.sp)
+            }
+            Box(Modifier.size(46.dp).clip(CircleShape).background(AccentBrush).clickable(onClick = onPlay), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.PlayArrow, "Riproduci cartella", tint = Color.White, modifier = Modifier.size(30.dp))
             }
         }
     }
 }
 
 @Composable
-fun PillButton(label: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
-    Row(
-        modifier.clip(CircleShape).background(Surface2).clickable(onClick = onClick).padding(vertical = 12.dp),
-        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, null, tint = Cyan); Spacer(Modifier.width(6.dp)); Text(label, fontWeight = FontWeight.SemiBold)
+fun TreeTrackRow(n: TrackNode, ui: PlayerUi, onClick: () -> Unit) {
+    val t = n.track
+    val active = ui.mediaId == t.id.toString()
+    val shape = RoundedCornerShape(14.dp)
+    Row(Modifier.fillMaxWidth().treeGuides(n.depth).padding(start = INDENT * n.depth, top = 2.dp, bottom = 2.dp)) {
+        Row(
+            Modifier.weight(1f).clip(shape).background(if (active) Surface2 else Bg.copy(alpha = 0.6f))
+                .border(1.dp, if (active) Cyan else Border.copy(alpha = 0.6f), shape)
+                .clickable(onClick = onClick).padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Cover(t.art(), 44.dp, 10.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(t.title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (active) Cyan else Color.White)
+                Text(
+                    listOf(t.artist, t.fileName.substringAfterLast('.', "").uppercase(), fmt(t.durationMs)).filter { it.isNotBlank() }.joinToString(" · "),
+                    color = TextDim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (active) EqBars(ui.playing)
+        }
     }
 }
 
@@ -219,6 +265,7 @@ fun AllTracks(vm: MainViewModel, ui: PlayerUi) {
         TextField(
             q, { vm.query.value = it }, singleLine = true,
             placeholder = { Text("Cerca titolo, artista, album, file...", color = TextDim) },
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.White),
             leadingIcon = { Icon(Icons.Rounded.Search, null, tint = TextDim) },
             shape = RoundedCornerShape(28.dp),
             colors = TextFieldDefaults.colors(
@@ -238,16 +285,17 @@ fun TrackRow(t: Track, ui: PlayerUi, onClick: () -> Unit) {
     val active = ui.mediaId == t.id.toString()
     Row(
         Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(16.dp))
-            .background(if (active) Surface2 else Surface1).clickable(onClick = onClick).padding(10.dp),
+            .background(if (active) Surface2 else Surface1).border(1.dp, if (active) Cyan else Border, RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick).padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Cover(t.uri, 48.dp, 10.dp)
+        Cover(t.art(), 48.dp, 10.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(t.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (active) Cyan else Color.White)
+            Text(t.title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (active) Cyan else Color.White)
             Text(
                 listOf(t.artist, t.fileName.substringAfterLast('.', "").uppercase(), fmt(t.durationMs)).filter { it.isNotBlank() }.joinToString(" · "),
-                color = TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                color = TextDim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
         }
         if (active) EqBars(ui.playing)
@@ -264,11 +312,11 @@ fun MiniPlayer(vm: MainViewModel, ui: PlayerUi, open: () -> Unit) {
             .clip(RoundedCornerShape(24.dp)).background(Surface2).clickable(onClick = open)
     ) {
         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Cover(ui.uri, 52.dp, 12.dp)
+            Cover(ui.art(), 52.dp, 12.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(ui.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(ui.artist.ifBlank { ui.album }, color = TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(ui.title, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(ui.artist.ifBlank { ui.album }, color = TextDim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             BigIcon(Icons.Rounded.SkipPrevious, "Precedente", 52.dp, 32.dp) { vm.prev() }
             Box(Modifier.size(56.dp).clip(CircleShape).background(AccentBrush).clickable { vm.toggle() }, contentAlignment = Alignment.Center) {
@@ -307,18 +355,22 @@ fun NowPlaying(vm: MainViewModel, ui: PlayerUi, close: () -> Unit) {
             }
         }
 
-        // locandina PICCOLA + titoli
-        Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        // locandina PICCOLA affiancata ad album e formato
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(contentAlignment = Alignment.Center) {
-                Box(Modifier.size(112.dp).alpha(if (ui.playing) glow else 0.25f).background(Brush.radialGradient(listOf(Pink, Color.Transparent)), CircleShape))
-                Cover(ui.uri, 96.dp, 18.dp, Modifier.shadow(12.dp, RoundedCornerShape(18.dp), spotColor = Violet))
+                Box(Modifier.size(108.dp).alpha(if (ui.playing) glow else 0.25f).background(Brush.radialGradient(listOf(Pink, Color.Transparent)), CircleShape))
+                Cover(ui.art(), 88.dp, 16.dp, Modifier.shadow(12.dp, RoundedCornerShape(16.dp), spotColor = Violet))
             }
             Spacer(Modifier.width(16.dp))
-            Column {
-                Text(ui.title, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                if (ui.artist.isNotBlank()) Text(ui.artist, color = Pink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (ui.album.isNotBlank()) Text(ui.album, color = TextDim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            if (ui.album.isNotBlank()) Text(ui.album, color = TextDim, fontSize = 17.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        }
+
+        // TITOLO e AUTORE grandi
+        Spacer(Modifier.height(16.dp))
+        Text(ui.title, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        if (ui.artist.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(ui.artist, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold, color = Pink, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
 
         Spacer(Modifier.weight(1f))
@@ -328,13 +380,13 @@ fun NowPlaying(vm: MainViewModel, ui: PlayerUi, close: () -> Unit) {
             value = pos.coerceIn(0f, dur), onValueChange = { drag = it },
             onValueChangeFinished = { drag?.let { vm.seekTo(it.toLong()) }; drag = null },
             valueRange = 0f..dur,
-            colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Pink, inactiveTrackColor = Surface2)
+            colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Pink, inactiveTrackColor = Border)
         )
         Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(fmt(pos.toLong()), color = TextDim); Text(fmt(ui.durationMs), color = TextDim)
+            Text(fmt(pos.toLong()), color = Color.White, fontSize = 16.sp); Text(fmt(ui.durationMs), color = Color.White, fontSize = 16.sp)
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(12.dp))
 
         // pulsanti GRANDI
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {

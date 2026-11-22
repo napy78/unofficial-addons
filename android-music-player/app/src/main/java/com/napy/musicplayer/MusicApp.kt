@@ -13,7 +13,7 @@ class MusicApp : Application(), ImageLoaderFactory {
     override fun newImageLoader(): ImageLoader =
         ImageLoader.Builder(this)
             .components {
-                add(coil.key.Keyer<ArtKey> { data, _ -> data.uri })
+                add(coil.key.Keyer<ArtKey> { data, _ -> data.cacheKey })
                 add(ArtFetcher.Factory(this@MusicApp))
             }
             .crossfade(true)

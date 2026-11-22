@@ -31,7 +31,10 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     if (!granted) {
                         val perms = mutableListOf(audioPerm)
-                        if (Build.VERSION.SDK_INT >= 33) perms += Manifest.permission.POST_NOTIFICATIONS
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            perms += Manifest.permission.POST_NOTIFICATIONS
+                            perms += Manifest.permission.READ_MEDIA_IMAGES   // cover.jpg nelle cartelle
+                        }
                         launcher.launch(perms.toTypedArray())
                     }
                 }
