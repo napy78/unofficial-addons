@@ -13,6 +13,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.napy.musicplayer.MusicApp
+import com.napy.musicplayer.data.Excluded
 import com.napy.musicplayer.data.Folder
 import com.napy.musicplayer.data.Scanner
 import com.napy.musicplayer.data.Track
@@ -93,6 +94,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         walk(root, 0)
         return out
+    }
+
+    // ---------- cartelle escluse ----------
+    val excluded = dao.excluded().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun exclude(path: String) {
+        viewModelScope.launch {
+            dao.exclude(Excluded(path))
+            dao.deleteTracksUnder(path)
+            expanded.update { e -> e.filterNot { it == path || it.startsWith("$path/") }.toSet() }
+            scanner.rebuildFolders()
+        }
+    }
+
+    fun restore(path: String) {
+        viewModelScope.launch { dao.include(path); rescan() }
     }
 
     fun toggleFolder(path: String) { expanded.update { if (path in it) it - path else it + path } }
@@ -179,6 +196,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .setExtras(Bundle().apply {
                     putString("fmt", fileName.substringAfterLast('.', "").uppercase())
                     putString("path", path)
+                    putString("folder", folder)
                 })
                 .build()
         ).build()
@@ -193,10 +211,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         openPlayer.tryEmit(Unit)
     }
 
-    /** Tocco su un brano nell'albero: la coda e' l'elenco dei brani di quella cartella. */
+    /**
+     * Tocco su un brano nell'albero: la coda contiene tutta la cartella "genitore" (se esiste nell'albero),
+     * cosi' i pulsanti cartella successiva/precedente passano alle cartelle sorelle.
+     */
     fun playFromTree(t: Track) {
-        val siblings = tree.value.filterIsInstance<TrackNode>().map { it.track }.filter { it.folder == t.folder }
-        play(siblings, siblings.indexOfFirst { it.id == t.id }.coerceAtLeast(0))
+        viewModelScope.launch {
+            val parent = t.folder.substringBeforeLast('/', "")
+            val hasParent = tree.value.any { it is FolderNode && it.folder.path == parent }
+            val queue = if (hasParent) dao.tracksRecursive(parent) else dao.tracksRecursive(t.folder)
+            play(queue, queue.indexOfFirst { it.id == t.id }.coerceAtLeast(0))
+        }
     }
 
     fun playFolder(path: String, shuffle: Boolean) {
@@ -209,7 +234,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         controller?.let { if (it.currentPosition > 3000) it.seekTo(0) else it.seekToPreviousMediaItem() }
     }
     fun seekTo(ms: Long) { controller?.seekTo(ms); _ui.update { it.copy(positionMs = ms) } }
-    fun skipBy(ms: Long) { controller?.let { seekTo((it.currentPosition + ms).coerceIn(0, it.duration.coerceAtLeast(0))) } }
+
+    private fun folderOf(c: MediaController, i: Int) =
+        c.getMediaItemAt(i).mediaMetadata.extras?.getString("folder") ?: ""
+
+    /** Salta al primo brano della cartella successiva nella coda. */
+    fun nextFolder() {
+        val c = controller ?: return
+        val cur = c.currentMediaItemIndex
+        val f = folderOf(c, cur)
+        for (i in cur + 1 until c.mediaItemCount) if (folderOf(c, i) != f) { c.seekTo(i, 0); return }
+    }
+
+    /** Salta al primo brano della cartella precedente nella coda. */
+    fun prevFolder() {
+        val c = controller ?: return
+        var start = c.currentMediaItemIndex
+        val f = folderOf(c, start)
+        while (start > 0 && folderOf(c, start - 1) == f) start--
+        if (start == 0) { c.seekTo(0, 0); return }
+        val pf = folderOf(c, start - 1)
+        var ps = start - 1
+        while (ps > 0 && folderOf(c, ps - 1) == pf) ps--
+        c.seekTo(ps, 0)
+    }
     fun toggleShuffle() { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
     fun cycleRepeat() {
         controller?.let {

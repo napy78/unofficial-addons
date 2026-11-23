@@ -38,8 +38,19 @@ data class Folder(
     val artTitle: String
 )
 
+/** Cartella esclusa dalla scansione (vale anche per tutte le sue sottocartelle). */
+@Entity(tableName = "excluded")
+data class Excluded(@PrimaryKey val path: String)
+
 @Dao
 interface LibraryDao {
+    @Query("SELECT * FROM excluded ORDER BY path COLLATE NOCASE") fun excluded(): Flow<List<Excluded>>
+    @Query("SELECT * FROM excluded") suspend fun excludedOnce(): List<Excluded>
+    @Upsert suspend fun exclude(e: Excluded)
+    @Query("DELETE FROM excluded WHERE path = :p") suspend fun include(p: String)
+    @Query("DELETE FROM tracks WHERE folder = :f OR substr(folder, 1, length(:f) + 1) = :f || '/'")
+    suspend fun deleteTracksUnder(f: String)
+
     @Query("SELECT * FROM folders ORDER BY path COLLATE NOCASE")
     fun allFolders(): Flow<List<Folder>>
 
@@ -75,7 +86,7 @@ interface LibraryDao {
 data class Stamp(val id: Long, val modified: Long)
 data class RepRow(val folder: String, val uri: String, val path: String, val artist: String, val album: String, val title: String)
 
-@Database(entities = [Track::class, Folder::class], version = 2, exportSchema = false)
+@Database(entities = [Track::class, Folder::class, Excluded::class], version = 3, exportSchema = false)
 abstract class LibraryDb : RoomDatabase() {
     abstract fun dao(): LibraryDao
 
@@ -83,6 +94,11 @@ abstract class LibraryDb : RoomDatabase() {
         @Volatile private var inst: LibraryDb? = null
         fun get(ctx: Context): LibraryDb = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx.applicationContext, LibraryDb::class.java, "library.db")
+                .addMigrations(object : androidx.room.migration.Migration(2, 3) {
+                    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE IF NOT EXISTS `excluded` (`path` TEXT NOT NULL, PRIMARY KEY(`path`))")
+                    }
+                })
                 .fallbackToDestructiveMigration().build().also { inst = it }
         }
     }

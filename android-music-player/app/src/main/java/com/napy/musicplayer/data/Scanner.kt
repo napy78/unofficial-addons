@@ -18,6 +18,7 @@ class Scanner(private val ctx: Context, private val db: LibraryDb) {
     suspend fun scan(onProgress: (Int) -> Unit = {}): ScanResult = withContext(Dispatchers.IO) {
         val dao = db.dao()
         val known = dao.stamps().associate { it.id to it.modified }
+        val ex = dao.excludedOnce().map { it.path }
         val seen = HashSet<Long>()
         val batch = ArrayList<Track>()
         var added = 0
@@ -45,10 +46,12 @@ class Scanner(private val ctx: Context, private val db: LibraryDb) {
             val iMod = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
             while (c.moveToNext()) {
                 val id = c.getLong(iId)
+                val path = c.getString(iData) ?: continue
+                // cartelle escluse: il brano non entra in 'seen', quindi viene rimosso dall'archivio
+                if (ex.any { path.startsWith("$it/") }) continue
                 seen += id
                 val mod = c.getLong(iMod)
                 if (known[id] == mod) continue
-                val path = c.getString(iData) ?: continue
                 val slash = path.lastIndexOf('/')
                 val artist = c.getString(iArtist)?.takeUnless { it == "<unknown>" } ?: ""
                 batch += Track(
@@ -84,7 +87,7 @@ class Scanner(private val ctx: Context, private val db: LibraryDb) {
     private class Acc { var n = 0; var own = 0; var rep: RepRow? = null }
 
     /** Costruisce l'albero: ogni cartella con brani + tutti i suoi antenati, con conteggi e brano rappresentativo. */
-    private suspend fun rebuildFolders() {
+    suspend fun rebuildFolders() {
         val dao = db.dao()
         val map = HashMap<String, Acc>()
         for (r in dao.repRows()) {

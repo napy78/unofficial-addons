@@ -111,6 +111,9 @@ fun AppScreen(vm: MainViewModel, granted: Boolean, askPermission: () -> Unit) {
 fun Header(vm: MainViewModel) {
     val count by vm.trackCount.collectAsStateWithLifecycle()
     val scan by vm.scan.collectAsStateWithLifecycle()
+    val excluded by vm.excluded.collectAsStateWithLifecycle()
+    var showEx by remember { mutableStateOf(false) }
+    if (showEx) ExcludedDialog(vm, excluded.map { it.path }) { showEx = false }
     val spin = rememberInfiniteTransition(label = "spin")
     val angle by spin.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "a")
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -124,11 +127,40 @@ fun Header(vm: MainViewModel) {
                 color = TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
         }
+        IconButton(onClick = { showEx = true }, modifier = Modifier.size(52.dp).clip(CircleShape).background(Surface1)) {
+            BadgedBox(badge = { if (excluded.isNotEmpty()) Badge { Text("${excluded.size}") } }) {
+                Icon(Icons.Rounded.VisibilityOff, "Cartelle escluse", tint = Color.White)
+            }
+        }
+        Spacer(Modifier.width(8.dp))
         IconButton(onClick = vm::rescan, modifier = Modifier.size(52.dp).clip(CircleShape).background(Surface1)) {
             Icon(Icons.Rounded.Refresh, "Aggiorna libreria", tint = Cyan, modifier = Modifier.rotate(if (scan.running) angle else 0f))
         }
     }
     if (scan.running) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp).clip(CircleShape), color = Pink, trackColor = Surface1)
+}
+
+@Composable
+fun ExcludedDialog(vm: MainViewModel, paths: List<String>, close: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = close,
+        title = { Text("Cartelle escluse") },
+        text = {
+            if (paths.isEmpty()) Text("Nessuna cartella esclusa. Usa il menu \u22EE su una cartella per escluderla dalla scansione.")
+            else LazyColumn {
+                items(paths, key = { it }) { p ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(p.substringAfterLast('/'), fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(p, fontSize = 11.sp, color = TextDim, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                        TextButton({ vm.restore(p) }) { Text("Ripristina", color = Cyan) }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(close) { Text("Chiudi") } }
+    )
 }
 
 @Composable
@@ -170,6 +202,16 @@ private val INDENT = 22.dp
 fun TreeBrowser(vm: MainViewModel, ui: PlayerUi) {
     val rows by vm.tree.collectAsStateWithLifecycle()
     val open by vm.expanded.collectAsStateWithLifecycle()
+    var toExclude by remember { mutableStateOf<Folder?>(null) }
+    toExclude?.let { f ->
+        AlertDialog(
+            onDismissRequest = { toExclude = null },
+            title = { Text("Escludere \"${f.name}\"?") },
+            text = { Text("La cartella e le sue sottocartelle (${f.trackCount} brani) verranno tolte dall'archivio e non saranno piu' scansionate. I file non vengono cancellati. Puoi ripristinarla dall'icona occhio in alto.") },
+            confirmButton = { TextButton({ vm.exclude(f.path); toExclude = null }) { Text("Escludi", color = Pink) } },
+            dismissButton = { TextButton({ toExclude = null }) { Text("Annulla") } }
+        )
+    }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Tocca una cartella per aprirla", color = TextDim, fontSize = 14.sp, modifier = Modifier.weight(1f))
@@ -188,7 +230,7 @@ fun TreeBrowser(vm: MainViewModel, ui: PlayerUi) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
             items(rows, key = { it.key }) { node ->
                 when (node) {
-                    is FolderNode -> FolderRow(node, onToggle = { vm.toggleFolder(node.folder.path) }, onPlay = { vm.playFolder(node.folder.path, false) })
+                    is FolderNode -> FolderRow(node, onToggle = { vm.toggleFolder(node.folder.path) }, onPlay = { vm.playFolder(node.folder.path, false) }, onExclude = { toExclude = node.folder })
                     is TrackNode -> TreeTrackRow(node, ui) { vm.playFromTree(node.track) }
                 }
             }
@@ -206,7 +248,8 @@ private fun Modifier.treeGuides(depth: Int) = drawBehind {
 }
 
 @Composable
-fun FolderRow(n: FolderNode, onToggle: () -> Unit, onPlay: () -> Unit) {
+fun FolderRow(n: FolderNode, onToggle: () -> Unit, onPlay: () -> Unit, onExclude: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
     val rot by animateFloatAsState(if (n.open) 90f else 0f, label = "chev")
     val shape = RoundedCornerShape(16.dp)
     Row(Modifier.fillMaxWidth().treeGuides(n.depth).padding(start = INDENT * n.depth, top = 3.dp, bottom = 3.dp)) {
@@ -225,6 +268,16 @@ fun FolderRow(n: FolderNode, onToggle: () -> Unit, onPlay: () -> Unit) {
             }
             Box(Modifier.size(46.dp).clip(CircleShape).background(AccentBrush).clickable(onClick = onPlay), contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.PlayArrow, "Riproduci cartella", tint = Color.White, modifier = Modifier.size(30.dp))
+            }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Rounded.MoreVert, "Altro", tint = Color.White) }
+                DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Escludi dalla libreria") },
+                        leadingIcon = { Icon(Icons.Rounded.VisibilityOff, null) },
+                        onClick = { menu = false; onExclude() }
+                    )
+                }
             }
         }
     }
@@ -329,6 +382,18 @@ fun MiniPlayer(vm: MainViewModel, ui: PlayerUi, open: () -> Unit) {
 }
 
 @Composable
+fun FolderSkip(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Column(
+        Modifier.clip(RoundedCornerShape(20.dp)).background(Surface2).border(1.dp, Border, RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(icon, label.replace("\n", " "), tint = Cyan, modifier = Modifier.size(40.dp))
+        Text(label, color = Color.White, fontSize = 12.sp, lineHeight = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
 fun BigIcon(icon: ImageVector, desc: String, box: androidx.compose.ui.unit.Dp, iconSize: androidx.compose.ui.unit.Dp, tint: Color = Color.White, onClick: () -> Unit) {
     Box(Modifier.size(box).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
         Icon(icon, desc, tint = tint, modifier = Modifier.size(iconSize))
@@ -404,12 +469,12 @@ fun NowPlaying(vm: MainViewModel, ui: PlayerUi, close: () -> Unit) {
         Spacer(Modifier.height(20.dp))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-            BigIcon(Icons.Rounded.Shuffle, "Casuale", 72.dp, 40.dp, if (ui.shuffle) Cyan else TextDim) { vm.toggleShuffle() }
-            BigIcon(Icons.Rounded.Replay10, "-10s", 72.dp, 44.dp) { vm.skipBy(-10_000) }
-            BigIcon(Icons.Rounded.Forward10, "+10s", 72.dp, 44.dp) { vm.skipBy(10_000) }
+            BigIcon(Icons.Rounded.Shuffle, "Casuale", 64.dp, 38.dp, if (ui.shuffle) Cyan else TextDim) { vm.toggleShuffle() }
+            FolderSkip(Icons.Rounded.FastRewind, "Cartella\nprecedente") { vm.prevFolder() }
+            FolderSkip(Icons.Rounded.FastForward, "Cartella\nsuccessiva") { vm.nextFolder() }
             BigIcon(
                 if (ui.repeat == Player.REPEAT_MODE_ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-                "Ripeti", 72.dp, 40.dp, if (ui.repeat == Player.REPEAT_MODE_OFF) TextDim else Cyan
+                "Ripeti", 64.dp, 38.dp, if (ui.repeat == Player.REPEAT_MODE_OFF) TextDim else Cyan
             ) { vm.cycleRepeat() }
         }
         Spacer(Modifier.height(24.dp))
