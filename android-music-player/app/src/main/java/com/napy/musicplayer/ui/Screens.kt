@@ -438,7 +438,8 @@ fun NowPlaying(vm: MainViewModel, ui: PlayerUi, close: () -> Unit) {
             Text(ui.artist, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold, color = Pink, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
 
-        Spacer(Modifier.weight(1f))
+        // analizzatore di spettro in tempo reale
+        SpectrumView(ui.playing, Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp))
 
         // barra di avanzamento
         Slider(
