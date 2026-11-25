@@ -123,7 +123,7 @@ fun SpectrumView(playing: Boolean, modifier: Modifier = Modifier) {
         // suggerimento con frequenza e livello
         touchX?.let { tx ->
             val i = (tx / widthPx * n).toInt().coerceIn(0, n - 1)
-            val db = shown[i] * SpectrumBus.RANGE_DB + SpectrumBus.FLOOR_DB
+            val db = SpectrumBus.dbs[i].coerceAtLeast(-99f)
             val c = SpectrumBus.centers
             Text(
                 "${if (c[i] > 0) hz(c[i]) else "-"}  ·  ${"%.0f".format(db)} dB",

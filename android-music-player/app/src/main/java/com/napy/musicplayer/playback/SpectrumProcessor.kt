@@ -10,11 +10,13 @@ import kotlin.math.*
 /** Dati condivisi tra servizio (analisi) e UI (disegno): stesso processo, quindi basta un singleton. */
 object SpectrumBus {
     const val BANDS = 20
-    const val FLOOR_DB = -72f
-    const val RANGE_DB = 66f
+    const val FLOOR_DB = -80f        // livello 0 della barra
+    const val RANGE_DB = 72f         // 0 dB = sinusoide a fondo scala; la barra e' piena a -8 dB
+    const val GAMMA = 1.5f           // >1: piu' contrasto, le barre non restano tutte in alto
 
     @Volatile var levels = FloatArray(BANDS)          // 0..1 per banda
     @Volatile var centers = FloatArray(BANDS)         // frequenza centrale (Hz)
+    @Volatile var dbs = FloatArray(BANDS)             // livello reale in dB (senza compensazioni)
     @Volatile var stamp = 0L                          // System.nanoTime() dell'ultimo aggiornamento
 }
 
@@ -53,7 +55,7 @@ class SpectrumProcessor : BaseAudioProcessor() {
             lo[i] = max(1, (a / bw).roundToInt())
             hi[i] = max(lo[i], (b / bw).toInt())
             centers[i] = sqrt(a * b)
-            tilt[i] = 3f * (ln(centers[i] / 700f) / ln(2f))   // +3 dB/ottava: compensa il calo naturale degli acuti
+            tilt[i] = 1.5f * (ln(centers[i] / 700f) / ln(2f))   // lieve +1,5 dB/ottava: i bassi restano piu' alti, come in uno spettro reale
         }
         SpectrumBus.centers = centers
         return inputAudioFormat
@@ -108,13 +110,25 @@ class SpectrumProcessor : BaseAudioProcessor() {
             len = len shl 1
         }
         val out = FloatArray(SpectrumBus.BANDS)
+        val rawDb = FloatArray(SpectrumBus.BANDS)
         for (band in 0 until SpectrumBus.BANDS) {
-            var m = 0f
-            for (k in lo[band]..min(hi[band], n / 2 - 1)) m = max(m, re[k] * re[k] + im[k] * im[k])
-            val norm = sqrt(m) / (n / 4f)                    // 1.0 = sinusoide a fondo scala
-            val db = 20f * log10(norm + 1e-9f) + tilt[band]
-            out[band] = ((db - SpectrumBus.FLOOR_DB) / SpectrumBus.RANGE_DB).coerceIn(0f, 1f)
+            var peak = 0f
+            var sum = 0f
+            val k1 = min(hi[band], n / 2 - 1)
+            for (k in lo[band]..k1) {
+                val p = re[k] * re[k] + im[k] * im[k]
+                peak = max(peak, p)
+                sum += p
+            }
+            val rms = sqrt(sum / (k1 - lo[band] + 1))
+            val mag = 0.5f * (sqrt(peak) + rms)              // meta' picco, meta' media: ne' spigolosa ne' piatta
+            val norm = mag / (n / 4f)                        // 1.0 = sinusoide a fondo scala
+            val db = 20f * log10(norm + 1e-9f)
+            rawDb[band] = db
+            val lin = ((db + tilt[band] - SpectrumBus.FLOOR_DB) / SpectrumBus.RANGE_DB).coerceIn(0f, 1f)
+            out[band] = lin.pow(SpectrumBus.GAMMA)
         }
+        SpectrumBus.dbs = rawDb
         SpectrumBus.levels = out
         SpectrumBus.stamp = System.nanoTime()
     }
