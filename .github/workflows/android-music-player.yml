@@ -1,4 +1,4 @@
-name: Build Napy Player APK
+name: Build NardiTune APK
 on:
   push:
     paths: ['android-music-player/**', '.github/workflows/android-music-player.yml']
@@ -21,15 +21,15 @@ jobs:
       - run: ./gradlew assembleRelease --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: NapyPlayer-apk
+          name: NardiTune-apk
           path: android-music-player/app/build/outputs/apk/release/*.apk
       - name: Pubblica Release con l'APK
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/release/*.apk NapyPlayer.apk
-          gh release create "napyplayer-build-${{ github.run_number }}" NapyPlayer.apk \
+          cp app/build/outputs/apk/release/*.apk NardiTune.apk
+          gh release create "narditune-build-${{ github.run_number }}" NardiTune.apk \
             --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease \
-            --title "Napy Player - build ${{ github.run_number }}" \
+            --title "NardiTune - build ${{ github.run_number }}" \
             --notes "APK installabile (firmato con chiave di debug). Commit ${{ github.sha }}"

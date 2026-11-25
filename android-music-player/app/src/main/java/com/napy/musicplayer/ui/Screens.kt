@@ -119,7 +119,7 @@ fun Header(vm: MainViewModel) {
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(
-                "Napy Player",
+                "NardiTune",
                 style = TextStyle(brush = AccentBrush, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
             )
             Text(

@@ -132,7 +132,7 @@ class ArtFetcher(private val ctx: Context, private val key: ArtKey) : Fetcher {
     private fun httpGet(url: String): ByteArray {
         val c = URL(url).openConnection() as HttpURLConnection
         c.connectTimeout = 8000; c.readTimeout = 8000
-        c.setRequestProperty("User-Agent", "NapyPlayer/1.0")
+        c.setRequestProperty("User-Agent", "NardiTune/1.0")
         try {
             if (c.responseCode != 200) error("HTTP ${c.responseCode}")
             return c.inputStream.use { it.readBytes() }

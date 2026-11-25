@@ -1,4 +1,4 @@
-# Napy Player
+# NardiTune
 
 Lettore musicale Android (Kotlin + Jetpack Compose + Media3/ExoPlayer + Room).
 
@@ -12,4 +12,4 @@ Lettore musicale Android (Kotlin + Jetpack Compose + Media3/ExoPlayer + Room).
 ## Build
 - Android Studio: apri la cartella `android-music-player` e premi Run.
 - Da riga di comando (serve Android SDK): `./gradlew assembleRelease` -> `app/build/outputs/apk/release/`
-- GitHub Actions: il workflow `Build Napy Player APK` produce l'APK scaricabile come artifact.
+- GitHub Actions: il workflow `Build NardiTune APK` produce l'APK scaricabile come artifact.
