@@ -9,7 +9,7 @@ import kotlin.math.*
 
 /** Dati condivisi tra servizio (analisi) e UI (disegno): stesso processo, quindi basta un singleton. */
 object SpectrumBus {
-    const val BANDS = 40
+    const val BANDS = 20
     const val FLOOR_DB = -72f
     const val RANGE_DB = 66f
 
@@ -20,7 +20,7 @@ object SpectrumBus {
 
 /**
  * Processore audio "trasparente": lascia passare il PCM invariato e intanto calcola una FFT
- * (2048 campioni, finestra di Hann) raggruppata in 40 bande logaritmiche, 40 Hz - 16 kHz.
+ * (2048 campioni, finestra di Hann) raggruppata in 20 bande logaritmiche, 40 Hz - 16 kHz.
  * Lavora sull'audio realmente decodificato, quindi funziona con qualsiasi formato (anche FFmpeg).
  */
 class SpectrumProcessor : BaseAudioProcessor() {

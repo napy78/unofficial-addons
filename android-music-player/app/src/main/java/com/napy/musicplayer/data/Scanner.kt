@@ -7,6 +7,9 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** Cartella trovata in MediaStore, per il selettore delle cartelle da scansionare. */
+data class PickFolder(val path: String, val parent: String, val name: String, val total: Int, val own: Int)
+
 data class ScanResult(val added: Int, val removed: Int, val total: Int)
 
 /**
@@ -18,7 +21,7 @@ class Scanner(private val ctx: Context, private val db: LibraryDb) {
     suspend fun scan(onProgress: (Int) -> Unit = {}): ScanResult = withContext(Dispatchers.IO) {
         val dao = db.dao()
         val known = dao.stamps().associate { it.id to it.modified }
-        val ex = dao.excludedOnce().map { it.path }
+        val inc = dao.includedOnce().map { it.path }
         val seen = HashSet<Long>()
         val batch = ArrayList<Track>()
         var added = 0
@@ -47,8 +50,8 @@ class Scanner(private val ctx: Context, private val db: LibraryDb) {
             while (c.moveToNext()) {
                 val id = c.getLong(iId)
                 val path = c.getString(iData) ?: continue
-                // cartelle escluse: il brano non entra in 'seen', quindi viene rimosso dall'archivio
-                if (ex.any { path.startsWith("$it/") }) continue
+                // solo le cartelle scelte (se ce ne sono): gli altri brani non entrano in 'seen' e vengono rimossi
+                if (inc.isNotEmpty() && inc.none { path.startsWith("$it/") }) continue
                 seen += id
                 val mod = c.getLong(iMod)
                 if (known[id] == mod) continue
@@ -82,6 +85,28 @@ class Scanner(private val ctx: Context, private val db: LibraryDb) {
 
         rebuildFolders()
         ScanResult(added, gone.size, seen.size)
+    }
+
+    /** Elenca TUTTE le cartelle con audio presenti nel telefono (ignorando la selezione), con conteggi. */
+    suspend fun listAllFolders(): List<PickFolder> = withContext(Dispatchers.IO) {
+        val own = HashMap<String, Int>()
+        ctx.contentResolver.query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Audio.Media.DATA), null, null, null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val path = c.getString(0) ?: continue
+                val dir = path.substringBeforeLast('/', "")
+                if (dir.isNotEmpty()) own[dir] = (own[dir] ?: 0) + 1
+            }
+        }
+        val total = HashMap<String, Int>()
+        for ((dir, n) in own) {
+            var p = dir
+            while (p.isNotEmpty() && p != "/") { total[p] = (total[p] ?: 0) + n; p = p.substringBeforeLast('/', "") }
+        }
+        total.map { (path, t) ->
+            PickFolder(path, path.substringBeforeLast('/', ""), path.substringAfterLast('/'), t, own[path] ?: 0)
+        }.sortedBy { it.name.lowercase() }
     }
 
     private class Acc { var n = 0; var own = 0; var rep: RepRow? = null }

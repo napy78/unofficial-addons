@@ -111,9 +111,9 @@ fun AppScreen(vm: MainViewModel, granted: Boolean, askPermission: () -> Unit) {
 fun Header(vm: MainViewModel) {
     val count by vm.trackCount.collectAsStateWithLifecycle()
     val scan by vm.scan.collectAsStateWithLifecycle()
-    val excluded by vm.excluded.collectAsStateWithLifecycle()
-    var showEx by remember { mutableStateOf(false) }
-    if (showEx) ExcludedDialog(vm, excluded.map { it.path }) { showEx = false }
+    val included by vm.included.collectAsStateWithLifecycle()
+    var showPicker by remember { mutableStateOf(false) }
+    if (showPicker) ScanFoldersDialog(vm, included.toSet()) { showPicker = false }
     val spin = rememberInfiniteTransition(label = "spin")
     val angle by spin.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "a")
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -127,9 +127,9 @@ fun Header(vm: MainViewModel) {
                 color = TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
         }
-        IconButton(onClick = { showEx = true }, modifier = Modifier.size(52.dp).clip(CircleShape).background(Surface1)) {
-            BadgedBox(badge = { if (excluded.isNotEmpty()) Badge { Text("${excluded.size}") } }) {
-                Icon(Icons.Rounded.VisibilityOff, "Cartelle escluse", tint = Color.White)
+        IconButton(onClick = { vm.loadPickList(); showPicker = true }, modifier = Modifier.size(52.dp).clip(CircleShape).background(Surface1)) {
+            BadgedBox(badge = { if (included.isNotEmpty()) Badge { Text("${included.size}") } }) {
+                Icon(Icons.Rounded.CreateNewFolder, "Cartelle da scansionare", tint = Color.White)
             }
         }
         Spacer(Modifier.width(8.dp))
@@ -140,27 +140,101 @@ fun Header(vm: MainViewModel) {
     if (scan.running) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp).clip(CircleShape), color = Pink, trackColor = Surface1)
 }
 
+/** Selettore a schermo intero: spunta le cartelle da includere nella scansione (nessuna spunta = tutta la memoria). */
 @Composable
-fun ExcludedDialog(vm: MainViewModel, paths: List<String>, close: () -> Unit) {
-    AlertDialog(
+fun ScanFoldersDialog(vm: MainViewModel, initial: Set<String>, close: () -> Unit) {
+    val list by vm.pickList.collectAsStateWithLifecycle()
+    val selected = remember { mutableStateListOf<String>().apply { addAll(initial) } }
+    val open = remember { mutableStateListOf<String>() }
+
+    androidx.compose.ui.window.Dialog(
         onDismissRequest = close,
-        title = { Text("Cartelle escluse") },
-        text = {
-            if (paths.isEmpty()) Text("Nessuna cartella esclusa. Usa il menu \u22EE su una cartella per escluderla dalla scansione.")
-            else LazyColumn {
-                items(paths, key = { it }) { p ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(p.substringAfterLast('/'), fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(p, fontSize = 11.sp, color = TextDim, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Column(Modifier.fillMaxSize().background(Bg).statusBarsPadding().navigationBarsPadding().padding(16.dp)) {
+            Text("Cartelle da scansionare", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (selected.isEmpty()) "Nessuna spunta: viene scansionata tutta la memoria."
+                else "Verranno scansionate solo le ${selected.size} cartelle spuntate (con le loro sottocartelle).",
+                color = TextDim, fontSize = 14.sp
+            )
+            Spacer(Modifier.height(8.dp))
+
+            val all = list
+            if (all == null) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Pink) }
+            } else {
+                val kids = remember(all) { all.groupBy { it.parent } }
+                val root = remember(all) {
+                    var r = ""
+                    while (true) {
+                        val k = kids[r] ?: break
+                        if (k.size == 1 && k[0].own == 0) r = k[0].path else break
+                    }
+                    r
+                }
+                // righe visibili: (cartella, profondita')
+                val rows = ArrayList<Pair<com.napy.musicplayer.data.PickFolder, Int>>()
+                fun walk(parent: String, d: Int) {
+                    for (f in kids[parent].orEmpty()) {
+                        rows += f to d
+                        if (f.path in open) walk(f.path, d + 1)
+                    }
+                }
+                walk(root, 0)
+
+                LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                    items(rows, key = { it.first.path }) { (f, depth) ->
+                        val viaParent = selected.any { f.path.startsWith("$it/") }
+                        val checked = f.path in selected || viaParent
+                        val hasKids = kids[f.path].orEmpty().isNotEmpty()
+                        val isOpen = f.path in open
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = 20.dp * depth).padding(vertical = 2.dp)
+                                .clip(RoundedCornerShape(12.dp)).background(if (checked) Surface2 else Surface1)
+                                .border(1.dp, if (checked) Cyan else Border, RoundedCornerShape(12.dp))
+                                .padding(end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.size(44.dp).clickable(enabled = hasKids) { if (isOpen) open.remove(f.path) else open.add(f.path) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (hasKids) Icon(Icons.Rounded.ChevronRight, if (isOpen) "Chiudi" else "Apri", tint = Color.White, modifier = Modifier.size(28.dp).rotate(if (isOpen) 90f else 0f))
+                            }
+                            Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                                Text(f.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    if (viaParent) "${f.total} brani · inclusa dalla cartella superiore" else "${f.total} brani",
+                                    color = TextDim, fontSize = 12.sp
+                                )
+                            }
+                            Checkbox(
+                                checked = checked, enabled = !viaParent,
+                                onCheckedChange = {
+                                    if (f.path in selected) selected.remove(f.path)
+                                    else { selected.removeAll { s -> s.startsWith(f.path + "/") }; selected.add(f.path) }
+                                },
+                                colors = CheckboxDefaults.colors(checkedColor = Cyan, checkmarkColor = Bg, uncheckedColor = TextDim, disabledCheckedColor = Cyan.copy(alpha = 0.5f))
+                            )
                         }
-                        TextButton({ vm.restore(p) }) { Text("Ripristina", color = Cyan) }
                     }
                 }
             }
-        },
-        confirmButton = { TextButton(close) { Text("Chiudi") } }
-    )
+
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(close, Modifier.weight(1f)) { Text("Annulla") }
+                TextButton({ selected.clear() }, Modifier.weight(1f)) { Text("Tutta la memoria", color = Cyan) }
+                Button(
+                    onClick = { vm.saveIncluded(selected.toSet()); close() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Violet),
+                    modifier = Modifier.weight(1.3f)
+                ) { Text("Applica", color = Color.White, fontWeight = FontWeight.Bold) }
+            }
+        }
+    }
 }
 
 @Composable
@@ -202,16 +276,6 @@ private val INDENT = 22.dp
 fun TreeBrowser(vm: MainViewModel, ui: PlayerUi) {
     val rows by vm.tree.collectAsStateWithLifecycle()
     val open by vm.expanded.collectAsStateWithLifecycle()
-    var toExclude by remember { mutableStateOf<Folder?>(null) }
-    toExclude?.let { f ->
-        AlertDialog(
-            onDismissRequest = { toExclude = null },
-            title = { Text("Escludere \"${f.name}\"?") },
-            text = { Text("La cartella e le sue sottocartelle (${f.trackCount} brani) verranno tolte dall'archivio e non saranno piu' scansionate. I file non vengono cancellati. Puoi ripristinarla dall'icona occhio in alto.") },
-            confirmButton = { TextButton({ vm.exclude(f.path); toExclude = null }) { Text("Escludi", color = Pink) } },
-            dismissButton = { TextButton({ toExclude = null }) { Text("Annulla") } }
-        )
-    }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Tocca una cartella per aprirla", color = TextDim, fontSize = 14.sp, modifier = Modifier.weight(1f))
@@ -230,7 +294,7 @@ fun TreeBrowser(vm: MainViewModel, ui: PlayerUi) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
             items(rows, key = { it.key }) { node ->
                 when (node) {
-                    is FolderNode -> FolderRow(node, onToggle = { vm.toggleFolder(node.folder.path) }, onPlay = { vm.playFolder(node.folder.path, false) }, onExclude = { toExclude = node.folder })
+                    is FolderNode -> FolderRow(node, onToggle = { vm.toggleFolder(node.folder.path) }, onPlay = { vm.playFolder(node.folder.path, false) })
                     is TrackNode -> TreeTrackRow(node, ui) { vm.playFromTree(node.track) }
                 }
             }
@@ -248,8 +312,7 @@ private fun Modifier.treeGuides(depth: Int) = drawBehind {
 }
 
 @Composable
-fun FolderRow(n: FolderNode, onToggle: () -> Unit, onPlay: () -> Unit, onExclude: () -> Unit) {
-    var menu by remember { mutableStateOf(false) }
+fun FolderRow(n: FolderNode, onToggle: () -> Unit, onPlay: () -> Unit) {
     val rot by animateFloatAsState(if (n.open) 90f else 0f, label = "chev")
     val shape = RoundedCornerShape(16.dp)
     Row(Modifier.fillMaxWidth().treeGuides(n.depth).padding(start = INDENT * n.depth, top = 3.dp, bottom = 3.dp)) {
@@ -268,16 +331,6 @@ fun FolderRow(n: FolderNode, onToggle: () -> Unit, onPlay: () -> Unit, onExclude
             }
             Box(Modifier.size(46.dp).clip(CircleShape).background(AccentBrush).clickable(onClick = onPlay), contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.PlayArrow, "Riproduci cartella", tint = Color.White, modifier = Modifier.size(30.dp))
-            }
-            Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Rounded.MoreVert, "Altro", tint = Color.White) }
-                DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Escludi dalla libreria") },
-                        leadingIcon = { Icon(Icons.Rounded.VisibilityOff, null) },
-                        onClick = { menu = false; onExclude() }
-                    )
-                }
             }
         }
     }

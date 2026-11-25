@@ -13,7 +13,8 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.napy.musicplayer.MusicApp
-import com.napy.musicplayer.data.Excluded
+import com.napy.musicplayer.data.Included
+import com.napy.musicplayer.data.PickFolder
 import com.napy.musicplayer.data.Folder
 import com.napy.musicplayer.data.Scanner
 import com.napy.musicplayer.data.Track
@@ -96,20 +97,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return out
     }
 
-    // ---------- cartelle escluse ----------
-    val excluded = dao.excluded().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    // ---------- cartelle da scansionare ----------
+    /** Cartelle scelte per la scansione; vuoto = tutta la memoria. */
+    val included = dao.included().map { l -> l.map { it.path } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    fun exclude(path: String) {
-        viewModelScope.launch {
-            dao.exclude(Excluded(path))
-            dao.deleteTracksUnder(path)
-            expanded.update { e -> e.filterNot { it == path || it.startsWith("$path/") }.toSet() }
-            scanner.rebuildFolders()
-        }
+    /** Elenco completo delle cartelle del telefono per il selettore (null = in caricamento). */
+    val pickList = MutableStateFlow<List<PickFolder>?>(null)
+
+    fun loadPickList() {
+        viewModelScope.launch { pickList.value = null; pickList.value = scanner.listAllFolders() }
     }
 
-    fun restore(path: String) {
-        viewModelScope.launch { dao.include(path); rescan() }
+    fun saveIncluded(paths: Set<String>) {
+        viewModelScope.launch {
+            dao.clearIncluded()
+            dao.insertIncluded(paths.map { Included(it) })
+            expanded.value = emptySet()
+            rescan()
+        }
     }
 
     fun toggleFolder(path: String) { expanded.update { if (path in it) it - path else it + path } }

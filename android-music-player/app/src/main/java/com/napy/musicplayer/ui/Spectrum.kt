@@ -3,14 +3,11 @@ package com.napy.musicplayer.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
@@ -18,8 +15,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -38,7 +33,6 @@ private fun hz(f: Float) = if (f >= 1000) "%.1f kHz".format(f / 1000) else "${f.
 /**
  * Analizzatore di spettro in tempo reale (FFT sull'audio in riproduzione).
  * Tocca o trascina il dito sul grafico per leggere frequenza e livello di una banda.
- * Il pulsante in alto cambia stile: barre con riflesso / area.
  */
 @Composable
 fun SpectrumView(playing: Boolean, modifier: Modifier = Modifier) {
@@ -46,7 +40,6 @@ fun SpectrumView(playing: Boolean, modifier: Modifier = Modifier) {
     val shown = remember { FloatArray(n) }
     val peaks = remember { FloatArray(n) }
     var frame by remember { mutableLongStateOf(0L) }
-    var style by remember { mutableIntStateOf(0) }
     var touchX by remember { mutableStateOf<Float?>(null) }
     var widthPx by remember { mutableIntStateOf(1) }
     val measurer = rememberTextMeasurer()
@@ -91,7 +84,7 @@ fun SpectrumView(playing: Boolean, modifier: Modifier = Modifier) {
             val mainH = h * 0.82f
             val refH = h - mainH
             val slot = w / n
-            val gap = slot * 0.22f
+            val gap = slot * 0.28f
             val brush = Brush.verticalGradient(listOf(Pink, Violet, Cyan), startY = 0f, endY = mainH)
 
             // griglia
@@ -100,30 +93,16 @@ fun SpectrumView(playing: Boolean, modifier: Modifier = Modifier) {
                 drawLine(Border.copy(alpha = 0.45f), Offset(0f, y), Offset(w, y), 1.dp.toPx())
             }
 
-            if (style == 0) {
-                for (i in 0 until n) {
-                    val x = i * slot + gap / 2
-                    val bh = (shown[i] * mainH).coerceAtLeast(2.dp.toPx())
-                    drawRoundRect(brush, Offset(x, mainH - bh), Size(slot - gap, bh), CornerRadius(3.dp.toPx()))
-                    // riflesso
-                    val rh = shown[i] * refH
-                    drawRect(Cyan.copy(alpha = 0.22f), Offset(x, mainH + 2.dp.toPx()), Size(slot - gap, rh))
-                    // picco
-                    val py = mainH - peaks[i] * mainH
-                    drawRect(Color.White, Offset(x, (py - 4.dp.toPx()).coerceAtLeast(0f)), Size(slot - gap, 2.dp.toPx()))
-                }
-            } else {
-                val line = Path(); val area = Path()
-                area.moveTo(0f, mainH)
-                for (i in 0 until n) {
-                    val x = i * slot + slot / 2
-                    val y = mainH - shown[i] * mainH
-                    if (i == 0) line.moveTo(x, y) else line.lineTo(x, y)
-                    area.lineTo(x, y)
-                }
-                area.lineTo(w, mainH); area.close()
-                drawPath(area, Brush.verticalGradient(listOf(Pink.copy(alpha = 0.85f), Violet.copy(alpha = 0.35f), Color.Transparent), 0f, mainH))
-                drawPath(line, Cyan, style = Stroke(3.dp.toPx()))
+            for (i in 0 until n) {
+                val x = i * slot + gap / 2
+                val bh = (shown[i] * mainH).coerceAtLeast(2.dp.toPx())
+                drawRoundRect(brush, Offset(x, mainH - bh), Size(slot - gap, bh), CornerRadius(4.dp.toPx()))
+                // riflesso
+                val rh = shown[i] * refH
+                drawRect(Cyan.copy(alpha = 0.22f), Offset(x, mainH + 2.dp.toPx()), Size(slot - gap, rh))
+                // picco
+                val py = mainH - peaks[i] * mainH
+                drawRect(Color.White, Offset(x, (py - 4.dp.toPx()).coerceAtLeast(0f)), Size(slot - gap, 3.dp.toPx()))
             }
 
             // etichette di frequenza (asse logaritmico 40 Hz - 16 kHz)
@@ -155,11 +134,5 @@ fun SpectrumView(playing: Boolean, modifier: Modifier = Modifier) {
                     .border(1.dp, Cyan, RoundedCornerShape(10.dp)).padding(horizontal = 10.dp, vertical = 5.dp)
             )
         }
-
-        Text(
-            if (style == 0) "BARRE" else "AREA", color = Cyan, fontWeight = FontWeight.Bold, fontSize = 11.sp,
-            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).clip(CircleShape).background(Surface2)
-                .clickable { style = 1 - style }.padding(horizontal = 10.dp, vertical = 5.dp)
-        )
     }
 }
