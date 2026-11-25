@@ -1,0 +1,20 @@
+{
+  "name": "mqtt-pad",
+  "version": "1.0.0",
+  "description": "Amazfit Balance (Zepp OS) - tastierino di pulsanti per pubblicare messaggi MQTT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "icons": "python3 tools/make_icons.py",
+    "test": "node --test tests/config.test.js && python3 tests/test_bridge.py",
+    "build": "zeus build",
+    "dev": "zeus dev"
+  },
+  "dependencies": {
+    "@zeppos/zml": "^0.0.43"
+  },
+  "devDependencies": {
+    "@zeppos/device-types": "^4.0.0",
+    "@zeppos/zeus-cli": "^1.10.3"
+  }
+}

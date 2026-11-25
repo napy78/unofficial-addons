@@ -1,0 +1,4 @@
+node_modules/
+dist/
+*.zab
+__pycache__/

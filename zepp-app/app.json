@@ -1,0 +1,33 @@
+{
+  "configVersion": "v3",
+  "app": {
+    "appId": 1048576,
+    "appName": "MQTT Pad",
+    "appType": "app",
+    "version": { "code": 1, "name": "1.0.0" },
+    "icon": "icon.png",
+    "vender": "unofficial-addons",
+    "description": "Pubblica messaggi MQTT con un tocco"
+  },
+  "permissions": ["data:os.device.info"],
+  "runtime": {
+    "apiVersion": { "compatible": "3.0", "target": "3.6", "minVersion": "3.0" }
+  },
+  "debug": false,
+  "targets": {
+    "common": {
+      "module": {
+        "page": { "pages": ["page/index"] },
+        "app-side": { "path": "app-side/index" },
+        "setting": { "path": "setting/index" }
+      },
+      "platforms": [{ "st": "r" }],
+      "designWidth": 480
+    }
+  },
+  "i18n": {
+    "en-US": { "appName": "MQTT Pad" },
+    "it-IT": { "appName": "MQTT Pad" }
+  },
+  "defaultLanguage": "en-US"
+}
